@@ -1,0 +1,24 @@
+[Unit]
+Description=Nylas scheduling agent — poll agent mailbox, propose and book meeting times
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/nylas-scheduling-agent
+
+# The nylas CLI is usually not on the default systemd user PATH.
+Environment=PATH=/home/linuxbrew/.linuxbrew/bin:/usr/local/bin:/usr/bin:/bin
+
+# On a headless host the CLI uses its encrypted file store, which needs a
+# passphrase. systemd never sources .bashrc, so it has to be passed here.
+#
+# Prefer a dedicated file over EnvironmentFile=<your .env>: pointing systemd at
+# a shared .env loads every unrelated secret into this process.
+EnvironmentFile=%h/.config/nylas/passphrase.env
+
+ExecStart=%h/nylas-scheduling-agent/.venv/bin/python3 \
+    %h/nylas-scheduling-agent/scheduling_agent.py \
+    --config %h/nylas-scheduling-agent/config.toml --send
+
+TimeoutStartSec=600

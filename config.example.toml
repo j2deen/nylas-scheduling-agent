@@ -1,0 +1,38 @@
+# Copy to config.toml and edit. config.toml is gitignored — it holds your
+# agent address, your allowlist, and the address of your model host, none of
+# which belong in version control.
+
+[account]
+# The Nylas agent account this runs as.
+agent_email = "agent@example.nylas.email"
+
+[senders]
+# Only these addresses get a reply. An agent that answers anyone is an open
+# relay for calendar spam and an unbounded prompt-injection surface, so this
+# has no default — it must be set explicitly.
+allowed = ["you@example.com"]
+
+[model]
+# Any OpenAI-compatible chat-completions endpoint. Tested against Ollama.
+url = "http://127.0.0.1:11434/v1/chat/completions"
+name = "gemma4:26b"
+connect_timeout_seconds = 10
+stall_timeout_seconds = 120
+
+[scheduling]
+timezone = "America/Toronto"
+search_days = 10
+default_duration_minutes = 30
+slots_to_offer = 3
+workday_start_hour = 9
+workday_end_hour = 17
+
+[limits]
+# Two autoresponders will otherwise volley forever.
+max_replies_per_thread = 3
+
+[paths]
+# Where per-thread state is kept, so replies are idempotent across ticks.
+state_file = "~/.local/state/nylas-scheduling-agent/state.json"
+# Absolute path to the nylas CLI binary.
+nylas_bin = "nylas"

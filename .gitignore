@@ -1,0 +1,8 @@
+# Holds the agent address, the sender allowlist, and the model host address.
+config.toml
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+state.json
