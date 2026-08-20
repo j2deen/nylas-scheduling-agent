@@ -22,6 +22,7 @@ Dry-run is the default. Pass --send to actually reply.
 """
 
 import argparse
+import html
 import json
 import os
 import re
@@ -468,13 +469,44 @@ def book(cfg, slot, duration_min, topic, attendee):
 # --- main ------------------------------------------------------------------
 
 
+# Gmail and friends quote the whole thread under a line like
+# "On Wed, Aug 19, 2026 at 9:52 PM <someone> wrote:". If `email clean` is
+# unavailable we have to cut that off ourselves, because the quoted text
+# carries the slot list we just sent — including its numbers.
+QUOTE_MARKER = re.compile(
+    r"^\s*(?:On .{0,120}?wrote:|-{2,}\s*Original Message|_{5,}|From:\s)",
+    re.M | re.I,
+)
+
+
+def strip_quoted(text):
+    cut = QUOTE_MARKER.search(text)
+    if cut:
+        text = text[:cut.start()]
+    # Drop any residual quote lines ("> ...").
+    kept = [ln for ln in text.splitlines() if not ln.lstrip().startswith(">")]
+    return "\n".join(kept).strip()
+
+
 def message_body(cfg, msg):
-    """Prefer the quoted-reply-stripped body; fall back to what we already have."""
+    """Return the sender's own words, without the quoted thread.
+
+    This matters more than it looks. A reply of "2" arrives with the entire
+    previous message quoted underneath, which is 200+ characters containing
+    the very slot numbers we offered. Feed that to detect_choice() and the
+    length cap suppresses the match, so a valid confirmation silently becomes
+    a fresh proposal instead."""
     cleaned = optional("clean", lambda: nylas(cfg, "email", "clean", msg.get("id")))
-    body = ""
-    if isinstance(cleaned, dict):
-        body = cleaned.get("body") or cleaned.get("text") or ""
-    return body or msg.get("snippet") or msg.get("body") or ""
+
+    # `email clean` returns a LIST, and the stripped text is in `conversation`.
+    # `body` on that same object is still full HTML with the quote attached.
+    for entry in as_list(cleaned):
+        if isinstance(entry, dict):
+            text = entry.get("conversation") or entry.get("text") or ""
+            if text.strip():
+                return strip_quoted(html.unescape(text))
+
+    return strip_quoted(html.unescape(msg.get("snippet") or msg.get("body") or ""))
 
 
 def handle_confirmation(cfg, msg, entry, body, sender, send):
@@ -486,11 +518,23 @@ def handle_confirmation(cfg, msg, entry, body, sender, send):
     if not choice:
         return False
 
+    # People correct themselves: "let's do 3" then "sorry meant 2". Whichever
+    # lands first wins, and the other must not be treated as a fresh request —
+    # otherwise the correction earns them an unwanted second proposal.
+    if entry.get("booked"):
+        log(f"  already booked {entry['booked']} — ignoring a second choice")
+        entry.setdefault("handled_messages", []).append(msg.get("id"))
+        return True
+
     duration = int(entry.get("duration") or cfg.default_duration)
     topic = entry.get("topic") or ""
     log(f"  confirmation: {choice.strftime('%a %b %d %H:%M %Z')}")
     if not send:
         log("  DRY RUN — would book and confirm")
+        # Record it in memory so a later stray choice in the same run previews
+        # the guard rather than claiming a second booking. State is not
+        # persisted on a dry run, so this cannot leak.
+        entry["booked"] = choice.isoformat()
         return True
 
     msg_id = msg.get("id")
@@ -502,7 +546,9 @@ def handle_confirmation(cfg, msg, entry, body, sender, send):
     entry["replies"] = entry.get("replies", 0) + 1
     entry.setdefault("handled_messages", []).append(msg_id)
     entry["booked"] = choice.isoformat()
-    entry.pop("offered", None)
+    # `offered` is deliberately kept: a later "sorry meant 2" must still resolve
+    # against the same list so it can be recognised and ignored, rather than
+    # falling through and being answered as a brand new request.
     log("  booked and confirmed")
     return True
 
@@ -598,7 +644,10 @@ def main():
             log(f"  FAILED at {e.stage}: {e.detail}")
             WARNINGS.append(f"{sender_of(msg)}: {e}")
 
-    write_state(cfg, state)
+    if args.send:
+        write_state(cfg, state)
+    else:
+        log("dry run — state not persisted")
     log(f"done — {acted} handled, {len(WARNINGS)} warning(s)")
     for w in WARNINGS:
         log(f"  warning: {w}")

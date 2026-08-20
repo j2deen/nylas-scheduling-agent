@@ -137,6 +137,11 @@ Things that produced silently wrong behaviour rather than errors:
   of hanging. `events create` does *not* prompt.
 - **Some subcommands ignore `--json`** and print a human line
   (`✓ Message marked as read`). Success, not a parse failure.
+- **`email clean` returns a list, and the stripped text is in `conversation`**
+  — the `body` on that same object is still full HTML with the quote attached.
+  Read the wrong field and you silently fall back to the raw snippet, which is
+  200+ characters of quoted thread containing the slot numbers you just sent.
+  A reply of "2" then fails to register as a confirmation at all.
 
 ## Limitations
 

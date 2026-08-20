@@ -231,7 +231,7 @@ def test_reply_passes_yes_so_it_cannot_block_on_a_prompt(cfg, monkeypatch):
     def fake_nylas(_cfg, *args, **kw):
         calls.append(args)
         if args[:2] == ("email", "clean"):
-            return {"body": "Can we meet for 30 minutes?"}
+            return [{"conversation": "Can we meet for 30 minutes?"}]
         return None
 
     monkeypatch.setattr(sa, "nylas", fake_nylas)
@@ -255,7 +255,7 @@ def test_confirmation_reply_also_passes_yes(cfg, monkeypatch):
     def fake_nylas(_cfg, *args, **kw):
         calls.append(args)
         if args[:2] == ("email", "clean"):
-            return {"body": "2"}
+            return [{"conversation": "2"}]
         return None
 
     monkeypatch.setattr(sa, "nylas", fake_nylas)
@@ -300,3 +300,32 @@ def test_a_plain_text_success_line_is_not_an_error(cfg, monkeypatch):
 
     monkeypatch.setattr(sa.subprocess, "run", fake_run)
     assert sa.nylas(cfg, "email", "mark", "read", "m1") == "✓ Message marked as read"
+
+
+def test_a_corrected_choice_does_not_trigger_a_second_proposal(cfg, monkeypatch):
+    """"Let's do 3" then "sorry meant 2": whichever lands first books, and the
+    other must be recognised and dropped, not answered as a new request."""
+    calls = []
+    monkeypatch.setattr(sa, "nylas", lambda _c, *a, **k: calls.append(a))
+    monkeypatch.setattr(sa, "book", lambda *a, **k: None)
+
+    entry = {"offered": OFFERED, "duration": 30, "topic": "sync",
+             "booked": "2026-08-21T09:00:00-04:00"}
+    handled = sa.handle_confirmation(cfg, {"id": "m2"}, entry, "Let's do 3",
+                                     "allowed@example.com", send=True)
+
+    assert handled, "the stray choice must be consumed, not fall through"
+    assert not [c for c in calls if c[:2] == ("email", "reply")], \
+        "an already-booked thread must not send another email"
+
+
+def test_quoted_thread_is_stripped_before_choice_detection():
+    """A reply of "2" arrives with 200+ characters of quoted thread beneath it,
+    containing the very slot numbers we offered. Unstripped, the length cap
+    suppresses the match and a valid confirmation becomes a fresh proposal."""
+    raw = ("Sorry meant 2\r\n\r\nOn Wed, Aug 19, 2026 at 9:52 PM <agent@x.nylas.email> "
+           "wrote:\r\n\r\n> Happy to find time. Here are 3 open slots:\r\n> 1. Thursday\r\n")
+    assert len(raw) > sa.CONFIRM_MAX_CHARS
+    assert sa.detect_choice(raw, OFFERED) is None          # the bug
+    assert sa.detect_choice(sa.strip_quoted(raw), OFFERED) == \
+        datetime.fromisoformat(OFFERED[1])                 # the fix
