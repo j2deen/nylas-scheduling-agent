@@ -329,3 +329,23 @@ def test_quoted_thread_is_stripped_before_choice_detection():
     assert sa.detect_choice(raw, OFFERED) is None          # the bug
     assert sa.detect_choice(sa.strip_quoted(raw), OFFERED) == \
         datetime.fromisoformat(OFFERED[1])                 # the fix
+
+
+@pytest.mark.parametrize("subject", [
+    "Accepted: AI agents and their future @ Fri Aug 21, 2026 9am (EDT)",
+    "Declined: Roadmap sync",
+    "Invitation: Coffee @ Mon Sep 1",
+    "Updated invitation: Roadmap sync",
+    "Canceled: Roadmap sync",
+])
+def test_calendar_notifications_are_not_meeting_requests(cfg, subject):
+    """Calendar clients send RSVPs from the attendee's own address, so the
+    allowlist waves them through. Without this the agent answers a person's
+    own acceptance with a fresh set of slots."""
+    msg = _msg("allowed@example.com", subject=subject, thread_id="new-thread")
+    assert sa.should_handle(cfg, msg, {"threads": {}}) == "calendar notification, not a request"
+
+
+def test_an_ordinary_subject_still_gets_through(cfg):
+    msg = _msg("allowed@example.com", subject="Re: Scheduling time")
+    assert sa.should_handle(cfg, msg, {"threads": {}}) is None

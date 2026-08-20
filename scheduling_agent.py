@@ -231,6 +231,21 @@ def as_list(payload, *keys):
 AUTOMATED_HINTS = ("no-reply", "noreply", "do-not-reply", "donotreply",
                    "mailer-daemon", "postmaster", "bounce")
 
+# Calendar clients mail RSVPs and invitations *from the attendee's own address*,
+# so the sender allowlist waves them straight through. Left alone, the agent
+# reads "Accepted: <meeting title>", decides it looks like a meeting request,
+# and answers a person's own acceptance with a fresh set of slots.
+CALENDAR_SUBJECT_PREFIXES = (
+    "accepted:", "declined:", "tentative:", "invitation:", "updated invitation:",
+    "canceled:", "cancelled:", "cancelled event:", "canceled event:",
+    "re: invitation:", "notification:", "reminder:",
+)
+
+
+def is_calendar_notification(msg):
+    subject = (msg.get("subject") or "").strip().lower()
+    return subject.startswith(CALENDAR_SUBJECT_PREFIXES)
+
 
 def sender_of(msg):
     frm = msg.get("from") or []
@@ -253,6 +268,8 @@ def should_handle(cfg, msg, state):
         return "message from self (loop guard)"
     if any(h in sender for h in AUTOMATED_HINTS):
         return f"automated sender ({sender})"
+    if is_calendar_notification(msg):
+        return "calendar notification, not a request"
     if sender not in cfg.allowed_senders:
         return f"sender not allowlisted ({sender})"
 
@@ -562,6 +579,8 @@ def handle_message(cfg, msg, state, send):
     skip = should_handle(cfg, msg, state)
     if skip:
         log(f"  skipped: {skip}")
+        if send:
+            optional("mark-read", lambda: nylas(cfg, "email", "mark", "read", msg_id))
         return False
 
     body = message_body(cfg, msg)

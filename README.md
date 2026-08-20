@@ -65,6 +65,11 @@ and that's the whole blast radius.
   spam and an unbounded injection surface.
 - **Loop caps.** Max replies per thread, plus self-sent and `no-reply`/
   `mailer-daemon` detection. Two autoresponders will otherwise volley forever.
+- **Calendar notifications are dropped.** RSVPs and invitations are mailed
+  *from the attendee's own address*, so the allowlist waves them through.
+  Without a subject-prefix guard the agent reads "Accepted: <title>", decides
+  it looks like a meeting request, and answers a person's own acceptance with
+  a fresh set of slots.
 - **Idempotency.** Handled message IDs are recorded per thread, so a timer tick
   that overlaps a slow run can't double-reply.
 - **Dry run by default.** `--send` is opt-in on every invocation.
