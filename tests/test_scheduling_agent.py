@@ -217,3 +217,86 @@ def test_sender_is_read_from_the_envelope():
     assert sa.sender_of({"from": [{"email": "A@Example.com"}]}) == "a@example.com"
     assert sa.sender_of({"from": []}) == ""
     assert sa.sender_of({}) == ""
+
+
+# --- the CLI's interactive prompts -----------------------------------------
+
+
+def test_reply_passes_yes_so_it_cannot_block_on_a_prompt(cfg, monkeypatch):
+    """`nylas email reply` prompts for confirmation. Because stdout is
+    captured, that prompt is invisible while the CLI waits on stdin until the
+    timeout — a silent six-minute hang that only appears on the --send path."""
+    calls = []
+
+    def fake_nylas(_cfg, *args, **kw):
+        calls.append(args)
+        if args[:2] == ("email", "clean"):
+            return {"body": "Can we meet for 30 minutes?"}
+        return None
+
+    monkeypatch.setattr(sa, "nylas", fake_nylas)
+    monkeypatch.setattr(sa, "extract_request",
+                        lambda *a, **k: {"is_meeting_request": True,
+                                         "duration_minutes": 30, "topic": "sync"})
+    monkeypatch.setattr(sa, "find_slots",
+                        lambda *a, **k: [datetime(2026, 8, 20, 9, 0, tzinfo=cfg.tz)])
+
+    sa.handle_message(cfg, _msg("allowed@example.com"), {"threads": {}}, send=True)
+
+    replies = [c for c in calls if c[:2] == ("email", "reply")]
+    assert replies, "expected a reply to be sent"
+    for call in replies:
+        assert "--yes" in call, f"reply would block on a confirmation prompt: {call}"
+
+
+def test_confirmation_reply_also_passes_yes(cfg, monkeypatch):
+    calls = []
+
+    def fake_nylas(_cfg, *args, **kw):
+        calls.append(args)
+        if args[:2] == ("email", "clean"):
+            return {"body": "2"}
+        return None
+
+    monkeypatch.setattr(sa, "nylas", fake_nylas)
+    monkeypatch.setattr(sa, "book", lambda *a, **k: None)
+
+    state = {"threads": {"t1": {"offered": OFFERED, "duration": 30, "topic": "sync"}}}
+    sa.handle_message(cfg, _msg("allowed@example.com"), state, send=True)
+
+    replies = [c for c in calls if c[:2] == ("email", "reply")]
+    assert replies, "expected a confirmation to be sent"
+    for call in replies:
+        assert "--yes" in call, f"confirmation would block on a prompt: {call}"
+
+
+def test_cli_is_never_given_a_terminal(cfg, monkeypatch):
+    """Belt and braces: even a subcommand we haven't audited must fail fast
+    rather than hang, so stdin is always closed."""
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen.update(kw)
+        class R:
+            returncode = 0
+            stdout = "{}"
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(sa.subprocess, "run", fake_run)
+    sa.nylas(cfg, "email", "list")
+    assert seen.get("stdin") is sa.subprocess.DEVNULL
+
+
+def test_a_plain_text_success_line_is_not_an_error(cfg, monkeypatch):
+    """`email mark read` ignores --json and prints "✓ Message marked as read".
+    The command succeeded, so nylas() must not raise on it."""
+    def fake_run(argv, **kw):
+        class R:
+            returncode = 0
+            stdout = "✓ Message marked as read"
+            stderr = ""
+        return R()
+
+    monkeypatch.setattr(sa.subprocess, "run", fake_run)
+    assert sa.nylas(cfg, "email", "mark", "read", "m1") == "✓ Message marked as read"

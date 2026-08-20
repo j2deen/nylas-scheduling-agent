@@ -130,6 +130,13 @@ Things that produced silently wrong behaviour rather than errors:
   a choice. Cap at one per day.
 - **`"can we do 1 hour instead?"` is not a confirmation.** A bare
   `\b([1-9])\b` books slot 1 for it.
+- **`email reply` and `email send` prompt for confirmation.** Scripted, with
+  stdout captured, that prompt is invisible while the CLI blocks on stdin until
+  your timeout fires — a silent hang, not an error. Pass `--yes`, and give the
+  subprocess `stdin=DEVNULL` so anything you haven't audited fails fast instead
+  of hanging. `events create` does *not* prompt.
+- **Some subcommands ignore `--json`** and print a human line
+  (`✓ Message marked as read`). Success, not a parse failure.
 
 ## Limitations
 

@@ -186,6 +186,10 @@ def nylas(cfg, *args, timeout=120):
     proc = subprocess.run(
         [cfg.nylas_bin, *args, "--json"],
         capture_output=True, text=True, timeout=timeout, env=dict(os.environ),
+        # Never inherit a terminal. Some subcommands prompt for confirmation,
+        # and with stdout captured that prompt is invisible while the CLI waits
+        # on stdin until the timeout fires. DEVNULL makes it fail fast instead.
+        stdin=subprocess.DEVNULL,
     )
     if proc.returncode != 0:
         raise RuntimeError(clean_cli_error(proc.stderr or proc.stdout))
@@ -199,7 +203,10 @@ def nylas(cfg, *args, timeout=120):
         # Spinner frames precede the JSON body on stdout.
         brace = min((i for i in (out.find("{"), out.find("[")) if i >= 0), default=-1)
         if brace < 0:
-            raise
+            # Some subcommands ignore --json and print a human line instead
+            # ("✓ Message marked as read"). The command succeeded, so this is
+            # not an error — hand back the text rather than raising.
+            return out
         return json.loads(out[brace:])
 
 
@@ -488,7 +495,7 @@ def handle_confirmation(cfg, msg, entry, body, sender, send):
 
     msg_id = msg.get("id")
     attempt("book", lambda: book(cfg, choice, duration, topic, sender))
-    attempt("confirm", lambda: nylas(cfg, "email", "reply", msg_id,
+    attempt("confirm", lambda: nylas(cfg, "email", "reply", msg_id, "--yes",
                                      "--body", compose_confirmation(choice, duration)))
     optional("mark-read", lambda: nylas(cfg, "email", "mark", "read", msg_id))
 
@@ -552,7 +559,7 @@ def handle_message(cfg, msg, state, send):
             log(f"    | {line}")
         return True
 
-    attempt("reply", lambda: nylas(cfg, "email", "reply", msg_id, "--body", reply))
+    attempt("reply", lambda: nylas(cfg, "email", "reply", msg_id, "--yes", "--body", reply))
     optional("mark-read", lambda: nylas(cfg, "email", "mark", "read", msg_id))
 
     entry["replies"] = entry.get("replies", 0) + 1
